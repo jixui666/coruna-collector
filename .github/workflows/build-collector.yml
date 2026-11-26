@@ -13,12 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang and lld
+      - name: Install LLVM 18
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang lld
-          clang --version | head -2
-          ld.lld --version
+          sudo apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          wget -qO- https://apt.llvm.org/llvm-script.deb.sh | sudo bash
+          sudo apt-get install -y -qq clang-18 lld-18
+          clang-18 --version | head -2
+          ld64.lld-18 --version || true
 
       - name: Fetch iPhoneOS SDK
         run: |
@@ -31,18 +33,18 @@ jobs:
         run: |
           SDK="$PWD/sdks/iPhoneOS16.5.sdk"
           set +e
-          clang -target arm64e-apple-ios16.0 \
+          clang-18 -target arm64e-apple-ios16.0 \
             -isysroot "$SDK" \
             -dynamiclib -fobjc-arc -O2 \
             -fno-constant-cfstrings \
-            -fuse-ld=lld \
+            -fuse-ld=lld-18 \
             -Wl,-undefined,dynamic_lookup \
             -Wl,-platform_version,ios,16.0,16.5 \
             -framework Foundation \
             -framework CoreFoundation \
             -o collector.dylib collector/collector.m > build.log 2>&1
           echo "exit=$?"
-          tail -25 build.log
+          tail -30 build.log
 
       - name: Inspect
         run: |
