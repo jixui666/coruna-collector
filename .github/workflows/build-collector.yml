@@ -23,10 +23,8 @@ jobs:
       - name: Fetch iPhoneOS SDK
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git sdks
-          cd sdks
-          git sparse-checkout set iPhoneOS16.5.sdk
+          cd sdks && git sparse-checkout set iPhoneOS16.5.sdk
           ls -d *.sdk
-          du -sh *.sdk
 
       - name: Build
         run: |
@@ -34,20 +32,26 @@ jobs:
           set +e
           clang -target arm64e-apple-ios16.0 \
             -isysroot "$SDK" \
-            -F"$SDK/System/Library/Frameworks" \
             -dynamiclib -fobjc-arc -O2 \
+            -fno-constant-cfstrings \
             -fuse-ld=lld \
             -Wl,-undefined,dynamic_lookup \
+            -Wl,-platform_version,ios,16.0,16.5 \
             -framework Foundation \
             -framework CoreFoundation \
-            -o collector.dylib collector/collector.m 2>&1 | tee build.log | tail -30
-          echo "exit=$?"
+            -o collector.dylib collector/collector.m 2>&1 | tee build.log | tail -25
           ls -l collector.dylib 2>/dev/null || echo "NO OUTPUT"
 
       - name: Inspect
         run: |
           file collector.dylib || true
-          xxd -l 8 collector.dylib || true
+          python3 -c "
+import struct,sys
+d=open('collector.dylib','rb').read()
+print('magic', d[:4].hex())
+print('cputype', hex(struct.unpack('<I', d[4:8])[0]))
+print('size', len(d))
+" 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
