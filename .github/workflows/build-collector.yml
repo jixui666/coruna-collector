@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang + lld
+      - name: Install clang and lld
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang lld
@@ -23,7 +23,8 @@ jobs:
       - name: Fetch iPhoneOS SDK
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git sdks
-          cd sdks && git sparse-checkout set iPhoneOS16.5.sdk
+          cd sdks
+          git sparse-checkout set iPhoneOS16.5.sdk
           ls -d *.sdk
 
       - name: Build
@@ -39,19 +40,15 @@ jobs:
             -Wl,-platform_version,ios,16.0,16.5 \
             -framework Foundation \
             -framework CoreFoundation \
-            -o collector.dylib collector/collector.m 2>&1 | tee build.log | tail -25
-          ls -l collector.dylib 2>/dev/null || echo "NO OUTPUT"
+            -o collector.dylib collector/collector.m > build.log 2>&1
+          echo "exit=$?"
+          tail -25 build.log
 
       - name: Inspect
         run: |
+          ls -l collector.dylib || echo NO_OUTPUT
           file collector.dylib || true
-          python3 -c "
-import struct,sys
-d=open('collector.dylib','rb').read()
-print('magic', d[:4].hex())
-print('cputype', hex(struct.unpack('<I', d[4:8])[0]))
-print('size', len(d))
-" 2>/dev/null || true
+          xxd -l 16 collector.dylib || true
 
       - uses: actions/upload-artifact@v4
         if: always()
