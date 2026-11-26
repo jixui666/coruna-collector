@@ -1,0 +1,54 @@
+name: build-collector
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'collector/**'
+      - '.github/workflows/build-collector.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Compile arm64e dylib
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos clang \
+            -target arm64e-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -dynamiclib \
+            -fobjc-arc \
+            -O2 \
+            -fvisibility=hidden \
+            -Wl,-install_name,@rpath/collector.dylib \
+            -Wl,-dead_strip \
+            -framework Foundation \
+            -framework CoreFoundation \
+            -lsqlite3 \
+            -o collector.dylib \
+            collector/collector.m
+
+      - name: Verify arch
+        run: |
+          lipo -info collector.dylib
+          file collector.dylib
+          otool -L collector.dylib
+          nm -gU collector.dylib | head -30 || true
+          ls -l collector.dylib
+
+      - name: Ad-hoc sign
+        run: codesign --force --sign - --timestamp=none collector.dylib || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: collector-dylib
+          path: collector.dylib
