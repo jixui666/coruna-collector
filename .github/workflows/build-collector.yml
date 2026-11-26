@@ -13,46 +13,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
+      - name: Install clang + lld
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang lld make git
-          clang --version
+          sudo apt-get install -y -qq clang lld
+          clang --version | head -2
           ld.lld --version
 
-      - name: Fetch iPhoneOS SDK (theos)
+      - name: Fetch iPhoneOS SDK
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$HOME/sdks"
-          cd "$HOME/sdks"
-          git sparse-checkout set iPhoneOS16.5.sdk || git sparse-checkout set $(git ls-tree -d --name-only HEAD | grep iPhoneOS | tail -1)
-          ls -d "$HOME"/sdks/*.sdk
-          SDK=$(ls -d "$HOME"/sdks/*.sdk | tail -1)
-          echo "SDK=$SDK" >> $GITHUB_ENV
-          ls "$SDK/usr/lib" | head -20 || true
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git sdks
+          cd sdks
+          git sparse-checkout set iPhoneOS16.5.sdk
+          ls -d *.sdk
+          du -sh *.sdk
 
-      - name: Compile arm64e dylib
+      - name: Build
         run: |
+          SDK="$PWD/sdks/iPhoneOS16.5.sdk"
+          set +e
           clang -target arm64e-apple-ios16.0 \
             -isysroot "$SDK" \
+            -F"$SDK/System/Library/Frameworks" \
             -dynamiclib -fobjc-arc -O2 \
             -fuse-ld=lld \
             -Wl,-undefined,dynamic_lookup \
             -framework Foundation \
             -framework CoreFoundation \
-            -lsqlite3 \
-            -o collector.dylib collector/collector.m 2>&1 | tail -40
-          ls -l collector.dylib 2>/dev/null || echo "BUILD FAILED"
+            -o collector.dylib collector/collector.m 2>&1 | tee build.log | tail -30
+          echo "exit=$?"
+          ls -l collector.dylib 2>/dev/null || echo "NO OUTPUT"
 
-      - name: Verify
+      - name: Inspect
         run: |
           file collector.dylib || true
-          xxd -l 16 collector.dylib || true
-          size collector.dylib || true
+          xxd -l 8 collector.dylib || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: collector-dylib
+          name: build-out
           path: |
             collector.dylib
-            collector.m.log
+            build.log
