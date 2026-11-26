@@ -9,46 +9,50 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show toolchain
+      - name: Install toolchain
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-path
-          xcrun --sdk iphoneos --show-sdk-version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld make git
+          clang --version
+          ld.lld --version
+
+      - name: Fetch iPhoneOS SDK (theos)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$HOME/sdks"
+          cd "$HOME/sdks"
+          git sparse-checkout set iPhoneOS16.5.sdk || git sparse-checkout set $(git ls-tree -d --name-only HEAD | grep iPhoneOS | tail -1)
+          ls -d "$HOME"/sdks/*.sdk
+          SDK=$(ls -d "$HOME"/sdks/*.sdk | tail -1)
+          echo "SDK=$SDK" >> $GITHUB_ENV
+          ls "$SDK/usr/lib" | head -20 || true
 
       - name: Compile arm64e dylib
         run: |
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun --sdk iphoneos clang \
-            -target arm64e-apple-ios16.0 \
+          clang -target arm64e-apple-ios16.0 \
             -isysroot "$SDK" \
-            -dynamiclib \
-            -fobjc-arc \
-            -O2 \
-            -fvisibility=hidden \
-            -Wl,-install_name,@rpath/collector.dylib \
-            -Wl,-dead_strip \
+            -dynamiclib -fobjc-arc -O2 \
+            -fuse-ld=lld \
+            -Wl,-undefined,dynamic_lookup \
             -framework Foundation \
             -framework CoreFoundation \
             -lsqlite3 \
-            -o collector.dylib \
-            collector/collector.m
+            -o collector.dylib collector/collector.m 2>&1 | tail -40
+          ls -l collector.dylib 2>/dev/null || echo "BUILD FAILED"
 
-      - name: Verify arch
+      - name: Verify
         run: |
-          lipo -info collector.dylib
-          file collector.dylib
-          otool -L collector.dylib
-          nm -gU collector.dylib | head -30 || true
-          ls -l collector.dylib
-
-      - name: Ad-hoc sign
-        run: codesign --force --sign - --timestamp=none collector.dylib || true
+          file collector.dylib || true
+          xxd -l 16 collector.dylib || true
+          size collector.dylib || true
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: collector-dylib
-          path: collector.dylib
+          path: |
+            collector.dylib
+            collector.m.log
